@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 # Manage the `qwen serve` tmux session from scripts/tmux_new.sh — one
 # subcommand per routine operation, so the server lifecycle and log capture
 # are each a single call.
@@ -9,14 +10,18 @@
 #   ./scripts/run-qwen-serve.sh logs [-n N]    last N scrollback lines (default 100)
 #   ./scripts/run-qwen-serve.sh logs -f        follow the pane (~2s refresh; Ctrl-c stops)
 #   ./scripts/run-qwen-serve.sh logs -o FILE   full scrollback since launch -> FILE
-#   ./scripts/run-qwen-serve.sh tee [FILE]     pipe live pane output to FILE
-#                                               (default /tmp/qwen-serve.log) — then
-#                                               `tail -f FILE` is a true live follow
+#   ./scripts/run-qwen-serve.sh tee [-f] [FILE]
+#                                               pipe live pane output to FILE
+#                                               (default /tmp/qwen-serve.log); -f:
+#                                               also follow it live here — Ctrl-c
+#                                               stops the follow only (tee-off
+#                                               stops the file)
 #   ./scripts/run-qwen-serve.sh tee-off        stop piping (file kept)
 #   ./scripts/run-qwen-serve.sh stop           graceful: Ctrl-c to serve, waits ~10s
 #   ./scripts/run-qwen-serve.sh kill           force: kill the session + the server
 #   ./scripts/run-qwen-serve.sh restart        stop (fall back to kill), then start
 #   ./scripts/run-qwen-serve.sh status         tmux version, session env, pane pid/cmd
+#   ./scripts/run-qwen-serve.sh help           show usage (-h / --help also work)
 #
 # Environment:
 #   TS_ADDR              Tailscale IP to bind (start/restart only, required)
@@ -44,13 +49,16 @@ usage: $(basename "$0") <command> [options]
   logs [-n N]    print last N scrollback lines (default 100)
   logs -f        follow the pane (~2s refresh, Ctrl-c to stop)
   logs -o FILE   write full scrollback since launch to FILE
-  tee [FILE]     append live pane output to FILE (default /tmp/qwen-serve.log)
-                 — then 'tail -f FILE' is a true live follow from any terminal
+  tee [-f] [FILE]
+                 append live pane output to FILE (default /tmp/qwen-serve.log);
+                 -f: also follow it live here — Ctrl-c stops the follow only,
+                 piping continues until 'tee-off'
   tee-off        stop piping pane output (file kept)
   stop           graceful stop (sends Ctrl-c, waits ~10s)
   kill           force: kill the session and the server with it
   restart        stop (fall back to kill), then start
   status         session alive? env + pane details
+  help           show this usage (-h / --help also work)
 
 env: TS_ADDR (start/restart), QWEN_SERVE_SESSION (default qwen-serve),
      QWEN_SERVE_PORT (default 4170)
@@ -113,6 +121,8 @@ cmd_logs() {
 # connects output only, so nothing can be typed into the pane through it.
 cmd_tee() {
     alive || die "no session '$SESSION'"
+    local follow=0
+    if [ "${1:-}" = "-f" ]; then follow=1; shift; fi
     local file="${1:-${QWEN_SERVE_LOG:-/tmp/qwen-serve.log}}"
     case "$file" in
         /*) ;;
@@ -120,6 +130,10 @@ cmd_tee() {
     esac
     : >>"$file" 2>/dev/null || die "cannot write to '$file'"
     tmux pipe-pane -O -t "$SESSION" "cat >> $(printf '%q' "$file")"
+    if [ "$follow" = 1 ]; then
+        echo "appending live pane output to: $file (Ctrl-c stops the follow only)"
+        exec tail -n 100 -F "$file"
+    fi
     echo "appending live pane output to: $file"
     echo "true live follow from any terminal:  tail -f '$file'"
     echo "stop piping:  $0 tee-off"
