@@ -1,10 +1,10 @@
 # Repository Guidelines
 
-Ops repo for running `qwen serve` (Qwen Code daemon/server) in a detached tmux session bound to a Tailscale IP. No build system, package manager, or CI — shell tooling plus a VS Code workspace file.
+Ops repo for running `qwen serve` (Qwen Code daemon/server) in a detached tmux session bound to a Tailscale IP. No build system, package manager, or CI — shell tooling plus a VS Code workspace file. Licensed AGPL-3.0 (`LICENSE`); `README.md` carries the human-facing usage docs.
 
 ## Project Structure & Module Organization
 
-Single-purpose: `scripts/run-qwen-serve.sh` wraps the entire `qwen serve` lifecycle in one tmux session (`qwen-serve`, overridable via `QWEN_SERVE_SESSION`), one subcommand per routine operation. Env plumbing is the non-obvious part: the tmux server snapshots its global environment once at first launch, so `start` both expands `TS_ADDR` into the command string and passes it via `tmux new -e`, making it visible to panes inside the session. `qwen-serve.code-workspace` opens the repo root in VS Code with no custom settings.
+Single-purpose: `scripts/run-qwen-serve.sh` wraps the entire `qwen serve` lifecycle in one tmux session (`qwen-serve`, overridable via `QWEN_SERVE_SESSION`), one subcommand per routine operation. Env plumbing is the non-obvious part: the tmux server snapshots its global environment once at first launch, so `start` both expands `TS_ADDR` into the command string and passes it via `tmux new -e`, making it visible to panes inside the session. Log capture has two distinct paths: `logs` reads tmux's screen model via `capture-pane` — lines hard-wrapped at the pane width (80 cols for a detached session under default-size), and `tee` taps the raw pane stream via `pipe-pane` — original unwrapped lines. `qwen-serve.code-workspace` opens the repo root in VS Code with no custom settings; `.gitignore` excludes runtime `*.log` files.
 
 ## Build, Test, and Development Commands
 
@@ -12,8 +12,9 @@ Single-purpose: `scripts/run-qwen-serve.sh` wraps the entire `qwen serve` lifecy
 TS_ADDR=100.x.x.x scripts/run-qwen-serve.sh start     # create detached session (TS_ADDR required)
 scripts/run-qwen-serve.sh attach [-r]                 # attach; Ctrl-b d detaches
 scripts/run-qwen-serve.sh logs [-n N | -f | -o FILE]  # scrollback / follow / full dump
-scripts/run-qwen-serve.sh tee [FILE]                  # live-pipe pane output (default /tmp/qwen-serve.log)
-scripts/run-qwen-serve.sh stop | kill | restart | status
+scripts/run-qwen-serve.sh tee [-f] [FILE]             # live-pipe pane output; -f = also follow here
+scripts/run-qwen-serve.sh tee-off                     # stop piping
+scripts/run-qwen-serve.sh stop | kill | restart | status | help
 bash -n scripts/run-qwen-serve.sh                     # syntax check — the only automated validation
 ```
 
