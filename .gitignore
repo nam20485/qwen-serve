@@ -1,2 +1,4 @@
 *.log
-.qwen/
+.qwen/tmp/
+__pycache__/
+
