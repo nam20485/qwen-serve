@@ -88,7 +88,9 @@ cmd_start() {
         die "session '$SESSION' already exists — try: $0 attach"
     fi
     [ -n "${TS_ADDR:-}" ] || die "TS_ADDR is not set (TS_ADDR=100.x.x.x $0 start)"
-    tmux new -d -s "$SESSION" -e TS_ADDR="$TS_ADDR" \
+    tmux new -d -s "$SESSION" \
+        -e TS_ADDR="$TS_ADDR" \
+        -e GH_QWEN_CODE_GH_CHANNEL_TURG_TOKEN="${GH_QWEN_CODE_GH_CHANNEL_TURG_TOKEN:-}" \
         "qwen serve --web --open --hostname $TS_ADDR --allow-origin http://${TS_ADDR}:${PORT}"
     echo "started '$SESSION'  ->  http://$TS_ADDR:$PORT  (attach: $0 attach)"
 }

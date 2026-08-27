@@ -2,17 +2,19 @@
   "channels": {
     "gh-qwen-bot": {
       "type": "github",
-      "useLocalGh": true,
+      "token": "$GH_QWEN_CODE_GH_CHANNEL_TURG_TOKEN",
       "groupPolicy": "allowlist",
       "senderPolicy": "allowlist",
       "allowedUsers": [
         "nam20485",
-        "intelagent1ne"
+        "intelagent1ne",
+        "turing_alpha"
       ],
       "groups": {
         "nam20485/qwen-serve": { "requireMention": true }
       },
-      "sessionScope": "chat_thread"
+      "sessionScope": "chat_thread",
+      "useLocalGh": false
     }
   },
   "$version": 4
