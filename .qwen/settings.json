@@ -1,0 +1,16 @@
+{
+  "channels": {
+    "gh-qwen-bot": {
+      "type": "github",
+      "useLocalGh": true,
+      "groupPolicy": "disabled",
+      "senderPolicy": "allowlist",
+      "allowedUsers": [
+        "nam20485",
+        "intelagent1ne"
+      ],
+      "sessionScope": "chat_thread"
+    }
+  },
+  "$version": 4
+}
