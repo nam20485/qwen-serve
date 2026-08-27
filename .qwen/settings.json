@@ -3,12 +3,15 @@
     "gh-qwen-bot": {
       "type": "github",
       "useLocalGh": true,
-      "groupPolicy": "disabled",
+      "groupPolicy": "allowlist",
       "senderPolicy": "allowlist",
       "allowedUsers": [
         "nam20485",
         "intelagent1ne"
       ],
+      "groups": {
+        "nam20485/qwen-serve": { "requireMention": true }
+      },
       "sessionScope": "chat_thread"
     }
   },
