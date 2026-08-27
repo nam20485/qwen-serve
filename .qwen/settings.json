@@ -17,5 +17,8 @@
       "useLocalGh": false
     }
   },
-  "$version": 4
+  "$version": 4,
+  "ui": {
+    "theme": "Qwen Dark"
+  }
 }

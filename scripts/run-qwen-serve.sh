@@ -88,6 +88,23 @@ cmd_start() {
         die "session '$SESSION' already exists — try: $0 attach"
     fi
     [ -n "${TS_ADDR:-}" ] || die "TS_ADDR is not set (TS_ADDR=100.x.x.x $0 start)"
+
+    # --channel support commented out: channel workers require QWEN_DAEMON_URL to be
+    # a loopback URL, which conflicts with binding the daemon to a Tailscale IP.
+    # local channel_args=""
+    # while [ $# -gt 0 ]; do
+    #     case "$1" in
+    #         --channel)
+    #             [ -n "${2:-}" ] || die "--channel requires a value (channel name or 'all')"
+    #             channel_args="$channel_args --channel $2"
+    #             shift 2
+    #             ;;
+    #         *)
+    #             die "unknown option for start: $1"
+    #             ;;
+    #     esac
+    # done
+
     tmux new -d -s "$SESSION" \
         -e TS_ADDR="$TS_ADDR" \
         -e GH_QWEN_CODE_GH_CHANNEL_TURG_TOKEN="${GH_QWEN_CODE_GH_CHANNEL_TURG_TOKEN:-}" \
@@ -270,7 +287,7 @@ cmd_restart() {
     if alive; then
         cmd_stop || { echo "warning: graceful stop failed; forcing" >&2; cmd_kill; }
     fi
-    cmd_start
+    cmd_start "$@"
 }
 
 cmd_status() {
