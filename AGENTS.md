@@ -11,6 +11,7 @@ Two parts: `scripts/run-qwen-serve.sh` wraps the entire `qwen serve` lifecycle i
 ```bash
 TS_ADDR=100.x.x.x scripts/run-qwen-serve.sh start     # create detached session (TS_ADDR required)
 scripts/run-qwen-serve.sh attach [-r]                 # attach; Ctrl-b d detaches
+scripts/run-qwen-serve.sh open                        # open Web UI in a browser (token as #token= fragment)
 scripts/run-qwen-serve.sh logs [-n N | -f | -o FILE]  # scrollback / follow / full dump
 scripts/run-qwen-serve.sh tee [-f] [FILE]             # live-pipe pane output; -f = also follow here
 scripts/run-qwen-serve.sh tee-off                     # stop piping
