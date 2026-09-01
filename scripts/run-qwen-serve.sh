@@ -7,6 +7,11 @@
 # Usage:
 #   ./scripts/run-qwen-serve.sh start          create the detached server session
 #   ./scripts/run-qwen-serve.sh attach [-r]    attach (-r = read-only); Ctrl-b d detaches
+#   ./scripts/run-qwen-serve.sh open           open the Web UI in a browser
+#                                               ($BROWSER, google-chrome, or
+#                                               xdg-open); passes the daemon's
+#                                               bearer token as a #token= URL
+#                                               fragment
 #   ./scripts/run-qwen-serve.sh logs [-n N]    last N scrollback lines (default 100)
 #   ./scripts/run-qwen-serve.sh logs -f        follow the pane (~2s refresh; Ctrl-c stops)
 #   ./scripts/run-qwen-serve.sh logs -o FILE   full scrollback since launch -> FILE
@@ -24,9 +29,15 @@
 #   ./scripts/run-qwen-serve.sh help           show usage (-h / --help also work)
 #
 # Environment:
-#   TS_ADDR              Tailscale IP to bind (start/restart only, required)
+#   TS_ADDR              Tailscale IP to bind (start/restart only, required;
+#                        open falls back to the session env)
 #   QWEN_SERVE_SESSION   session name    (default: qwen-serve)
 #   QWEN_SERVE_PORT      web origin port (default: 4170)
+#   QWEN_SERVER_TOKEN    daemon API bearer token — the daemon reads it at
+#                        start; open reads it here first, then from the
+#                        daemon's own process env / --token
+#   BROWSER              browser open prefers (default: google-chrome, then
+#                        xdg-open)
 #
 # Env-var plumbing: the tmux server snapshots its global environment once at
 # first launch, and every pane inherits that snapshot — NOT your current shell.
@@ -46,6 +57,9 @@ usage: $(basename "$0") <command> [options]
 
   start          create the detached server session (requires TS_ADDR)
   attach [-r]    attach to the session (-r read-only); Ctrl-b d detaches
+  open           open the Web UI in a browser (BROWSER env var, google-chrome,
+                 or xdg-open); finds TS_ADDR and the daemon's bearer token and
+                 passes it as a #token= URL fragment
   logs [-n N]    print last N scrollback lines (default 100)
   logs -f        follow the pane (~2s refresh, Ctrl-c to stop)
   logs -o FILE   write full scrollback since launch to FILE
@@ -60,8 +74,9 @@ usage: $(basename "$0") <command> [options]
   status         session alive? env + pane details
   help           show this usage (-h / --help also work)
 
-env: TS_ADDR (start/restart), QWEN_SERVE_SESSION (default qwen-serve),
-     QWEN_SERVE_PORT (default 4170)
+env: TS_ADDR (start/restart; open falls back to the session env),
+     QWEN_SERVE_SESSION (default qwen-serve), QWEN_SERVE_PORT (default 4170),
+     QWEN_SERVER_TOKEN (daemon auth token, read by open), BROWSER (open)
 EOF
 }
 
@@ -73,7 +88,26 @@ cmd_start() {
         die "session '$SESSION' already exists — try: $0 attach"
     fi
     [ -n "${TS_ADDR:-}" ] || die "TS_ADDR is not set (TS_ADDR=100.x.x.x $0 start)"
-    tmux new -d -s "$SESSION" -e TS_ADDR="$TS_ADDR" \
+
+    # --channel support commented out: channel workers require QWEN_DAEMON_URL to be
+    # a loopback URL, which conflicts with binding the daemon to a Tailscale IP.
+    # local channel_args=""
+    # while [ $# -gt 0 ]; do
+    #     case "$1" in
+    #         --channel)
+    #             [ -n "${2:-}" ] || die "--channel requires a value (channel name or 'all')"
+    #             channel_args="$channel_args --channel $2"
+    #             shift 2
+    #             ;;
+    #         *)
+    #             die "unknown option for start: $1"
+    #             ;;
+    #     esac
+    # done
+
+    tmux new -d -s "$SESSION" \
+        -e TS_ADDR="$TS_ADDR" \
+        -e GH_QWEN_CODE_GH_CHANNEL_TURG_TOKEN="${GH_QWEN_CODE_GH_CHANNEL_TURG_TOKEN:-}" \
         "qwen serve --web --open --hostname $TS_ADDR --allow-origin http://${TS_ADDR}:${PORT}"
     echo "started '$SESSION'  ->  http://$TS_ADDR:$PORT  (attach: $0 attach)"
 }
@@ -83,6 +117,88 @@ cmd_attach() {
     local ro=()
     if [ "${1:-}" = "-r" ]; then ro=(-r); fi
     exec tmux attach "${ro[@]}" -t "$SESSION"
+}
+
+# Print the pid of the `qwen serve` process in the pane — the pane pid itself
+# when tmux exec'd the command directly, otherwise a direct child.
+daemon_pid() {
+    local pane_pid child
+    pane_pid="$(tmux list-panes -t "$SESSION" -F '#{pane_pid}' | head -n 1)"
+    [ -n "$pane_pid" ] || return 1
+    if tr '\0' ' ' <"/proc/$pane_pid/cmdline" 2>/dev/null | grep -q 'qwen.*serve'; then
+        printf '%s\n' "$pane_pid"
+        return 0
+    fi
+    for child in $(ps -o pid= --ppid "$pane_pid" 2>/dev/null); do
+        if tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null | grep -q 'qwen.*serve'; then
+            printf '%s\n' "$child"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# The bearer token the daemon is running with: the caller's QWEN_SERVER_TOKEN
+# wins, then the daemon's process environment, then a --token argv pair.
+resolve_token() {
+    local pid=$1 tok="${QWEN_SERVER_TOKEN:-}"
+    if [ -z "$tok" ] && [ -n "$pid" ] && [ -r "/proc/$pid/environ" ]; then
+        tok="$(tr '\0' '\n' <"/proc/$pid/environ" | sed -n 's/^QWEN_SERVER_TOKEN=//p' | head -n 1)"
+    fi
+    if [ -z "$tok" ] && [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ]; then
+        tok="$(tr '\0' '\n' <"/proc/$pid/cmdline" | awk 'prev == "--token" { print; exit } { prev = $0 }')"
+    fi
+    printf '%s' "$tok"
+}
+
+# Percent-encode for a URL fragment (byte-wise — --token accepts any string).
+urlencode() {
+    local LC_ALL=C s=$1 out='' i c
+    for ((i = 0; i < ${#s}; i++)); do
+        c=${s:i:1}
+        case $c in
+            [a-zA-Z0-9.~_-]) out+=$c ;;
+            *) printf -v c '%%%02X' "'$c"; out+=$c ;;
+        esac
+    done
+    printf '%s' "$out"
+}
+
+cmd_open() {
+    alive || die "no session '$SESSION' — try: $0 start"
+    local addr="${TS_ADDR:-}"
+    if [ -z "$addr" ]; then
+        addr="$(tmux show-environment -t "$SESSION" TS_ADDR 2>/dev/null || true)"
+        addr="${addr#TS_ADDR=}"
+        case $addr in '' | -*) addr="";; esac
+    fi
+    [ -n "$addr" ] || die "TS_ADDR unknown — run: TS_ADDR=100.x.x.x $0 open"
+
+    local pid token url browser b
+    pid="$(daemon_pid || true)"
+    token="$(resolve_token "$pid")"
+
+    url="http://$addr:$PORT/"
+    if [ -n "$token" ]; then
+        # Fragment, not a query param: never sent to the server, so the token
+        # stays out of access logs and Referer headers. The Web Shell picks it
+        # up and strips it from the URL bar.
+        url="${url}#token=$(urlencode "$token")"
+    else
+        echo "warning: no bearer token found (QWEN_SERVER_TOKEN / --token) —" >&2
+        echo "         the UI loads but API calls will get 401" >&2
+    fi
+
+    browser="${BROWSER:-}"
+    if [ -z "$browser" ]; then
+        for b in google-chrome xdg-open; do
+            if command -v "$b" >/dev/null 2>&1; then browser=$b; break; fi
+        done
+    fi
+    [ -n "$browser" ] || die "no browser found (set BROWSER) — open manually: $url"
+
+    echo "opening http://$addr:$PORT/ in $browser${token:+ (token passed as #token= fragment)}"
+    "$browser" "$url" >/dev/null 2>&1 &
 }
 
 cmd_logs() {
@@ -171,7 +287,7 @@ cmd_restart() {
     if alive; then
         cmd_stop || { echo "warning: graceful stop failed; forcing" >&2; cmd_kill; }
     fi
-    cmd_start
+    cmd_start "$@"
 }
 
 cmd_status() {
@@ -194,6 +310,7 @@ command -v tmux >/dev/null 2>&1 || die "'tmux' not found on PATH"
 case "${1:-}" in
     start) shift; cmd_start "$@" ;;
     attach) shift; cmd_attach "$@" ;;
+    open) shift; cmd_open "$@" ;;
     logs) shift; cmd_logs "$@" ;;
     tee) shift; cmd_tee "$@" ;;
     tee-off) shift; cmd_tee_off "$@" ;;
@@ -210,3 +327,8 @@ esac
 #   with it the session.
 # - kill-session ends this session only; the tmux server itself keeps running
 #   (by design, it hosts all sessions). `tmux kill-server` ends ALL sessions.
+# - On a non-loopback bind the daemon API is bearer-token-gated (401 without
+#   one); only loopback binds are auth-free. `open` resolves the token from
+#   $QWEN_SERVER_TOKEN, the daemon's process env, or a --token argv pair and
+#   hands it to the browser as a #token= fragment — never sent to the server,
+#   and the Web Shell strips it from the URL bar after picking it up.
